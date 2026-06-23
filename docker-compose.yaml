@@ -1,0 +1,199 @@
+# ============================================================
+# docker-compose.yaml — MediDataLab
+# Orchestration de l'ensemble des services :
+# PostgreSQL, MongoDB, pgAdmin, Mongo Express, Portainer
+# et le pipeline d'ingestion Python (app)
+# ============================================================
+
+services:
+
+  # ----------------------------------------------------------
+  # Base relationnelle (données structurées : médecins, patients,
+  # médicaments, prescriptions)
+  # ----------------------------------------------------------
+  postgres:
+    image: postgres:16
+    container_name: postgres_db
+    restart: always
+
+    env_file:
+      - .env                     # charge les secrets depuis .env (jamais commité)
+
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+
+    ports:
+      - "5432:5432"             # hôte:conteneur
+
+    volumes:
+      - pg_data:/var/lib/postgresql/data   # persistance : sans ce volume,
+                                            # les données sont perdues au "down"
+
+    networks:
+      - medical_net
+
+    healthcheck:                 # vérifie que Postgres est VRAIMENT prêt
+                                  # (pas juste "démarré")
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+
+  # ----------------------------------------------------------
+  # Base NoSQL (données semi-structurées : consultations)
+  # ----------------------------------------------------------
+  mongo:
+    image: mongo:6
+    container_name: mongo_db
+    restart: always
+
+    env_file:
+      - .env
+
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
+
+    ports:
+      - "27017:27017"
+
+    volumes:
+      - mongo_data:/data/db
+
+    networks:
+      - medical_net
+
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+
+  # ----------------------------------------------------------
+  # Interface d'administration PostgreSQL
+  # ----------------------------------------------------------
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: pgadmin
+    restart: always
+
+    env_file:
+      - .env
+
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
+
+    ports:
+      - "5050:80"
+
+    depends_on:
+      postgres:
+        condition: service_healthy   # attend que Postgres soit healthy
+
+    networks:
+      - medical_net
+
+
+  # ----------------------------------------------------------
+  # Interface d'administration MongoDB
+  # ----------------------------------------------------------
+  mongo-express:
+    image: mongo-express:latest
+    container_name: mongo_express
+    restart: always
+
+    env_file:
+      - .env
+
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGO_USER}
+      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_PASSWORD}
+      ME_CONFIG_MONGODB_SERVER: mongo       # nom du service Docker, pas localhost
+
+      ME_CONFIG_BASICAUTH_USERNAME: ${MONGO_EXPRESS_USER}
+      ME_CONFIG_BASICAUTH_PASSWORD: ${MONGO_EXPRESS_PASSWORD}
+
+    ports:
+      - "8081:8081"
+
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+    networks:
+      - medical_net
+
+
+  # ----------------------------------------------------------
+  # Supervision de l'infrastructure (dashboard, logs, redémarrage)
+  # ----------------------------------------------------------
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    restart: always
+
+    ports:
+      - "9000:9000"
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock   # accès à l'API Docker
+      - portainer_data:/data
+
+    networks:
+      - medical_net
+
+
+  # ----------------------------------------------------------
+  # Pipeline d'ingestion Python
+  # Lit les CSV/JSON et alimente PostgreSQL + MongoDB
+  # ----------------------------------------------------------
+  app:
+    build: ./app                # construit l'image à partir de app/Dockerfile
+    container_name: data_ingestor
+    restart: always
+
+    env_file:
+      - .env
+
+    depends_on:
+      postgres:
+        condition: service_healthy   # n'insère rien avant que les 2 bases
+      mongo:                          # soient prêtes à recevoir des connexions
+        condition: service_healthy
+
+    volumes:
+      - ./app:/app                          # code source
+      - ./data_small:/data_small            # jeux de données à ingérer
+      - ./data_medium:/data_medium
+      - ./data_large:/data_large
+
+    working_dir: /app
+
+    command: ["python", "main.py"]
+
+    networks:
+      - medical_net
+
+
+# ============================================================
+# Réseau isolé : les services se contactent par leur nom
+# (ex: "postgres", "mongo") et non par "localhost"
+# ============================================================
+networks:
+  medical_net:
+    driver: bridge
+
+
+# ============================================================
+# Volumes nommés : persistance des données au-delà du cycle
+# de vie des conteneurs (docker compose down ne les supprime pas)
+# ============================================================
+volumes:
+  pg_data:
+  mongo_data:
+  portainer_data:
