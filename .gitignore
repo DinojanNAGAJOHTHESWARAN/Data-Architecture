@@ -1,8 +1,0 @@
-.env
-__pycache__/
-*.pyc
-.venv/
-data_small/
-data_medium/
-data_large/
-.DS_Store
