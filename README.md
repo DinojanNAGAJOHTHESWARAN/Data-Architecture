@@ -82,15 +82,15 @@ projet/
    ```
 3. Renseigner des valeurs réelles dans `.env` :
    ```env
-   POSTGRES_USER=dino
-   POSTGRES_PASSWORD=kami
-   POSTGRES_DB=medical_db
+   POSTGRES_USER=test
+   POSTGRES_PASSWORD=test
+   POSTGRES_DB=test
    POSTGRES_HOST=postgres
    POSTGRES_PORT=5432
 
-   MONGO_USER=dino
-   MONGO_PASSWORD=kami
-   MONGO_URI=mongodb://dino:kami@mongo:27017/
+   MONGO_USER=test
+   MONGO_PASSWORD=test
+   MONGO_URI=mongodb://test:test@mongo:27017/
 
    PGADMIN_EMAIL=admin@example.com
    PGADMIN_PASSWORD=changeme
